@@ -1,0 +1,6 @@
+services:
+  sql_exam_service:
+    image: sql-exam-service
+    container_name: sql_exam_service
+    ports:
+      - "8080:80"

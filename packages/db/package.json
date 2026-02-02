@@ -1,0 +1,19 @@
+{
+  "name": "@micro/db",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "seed": "node seed.js"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./conn": "./conn/index.js",
+    "./models": "./model/index.js"
+  },
+  "peerDependencies": {
+    "mongoose": "^8.0.0",
+    "redis": "^4.6.0",
+    "minio": "^8.0.5"
+  }
+}

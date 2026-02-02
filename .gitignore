@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# IDEs and Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.ntvs
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# env
+.env
+.env.*
+packages/envs/.env.*
+# Allow all example files
+!*.example
+!packages/envs/*.example
+
+# logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# build / test
+dist/
+build/
+out/
+coverage/
+.turbo/
+.cache/
+.vite/
+*.tsbuildinfo
+.eslintcache

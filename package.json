@@ -1,0 +1,10 @@
+{
+  "name": "micro-repo",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "docker compose -f docker-compose.yml up --build",
+    "build:base": "docker build -t micro-node-base:local -f docker/base.Dockerfile .",
+    "setup:env": "xcopy /y /s packages\\envs\\*.example packages\\envs\\*.shared* & xcopy /y packages\\envs\\*.admin.example packages\\envs\\*.admin & xcopy /y packages\\envs\\*.auth.example packages\\envs\\*.auth & xcopy /y packages\\envs\\*.user.example packages\\envs\\*.user & xcopy /y packages\\envs\\*.class-api.example packages\\envs\\*.class-api & xcopy /y packages\\envs\\*.gateway.example packages\\envs\\*.gateway & copy apps\\portal-ui\\.env.example apps\\portal-ui\\.env"
+  }
+}

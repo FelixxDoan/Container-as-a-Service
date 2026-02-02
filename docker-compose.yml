@@ -1,0 +1,277 @@
+# docker-compose.dev.yml
+
+# ---------- anchors (scalar) ----------
+x-env-shared: &env_shared ./packages/envs/.env.shared
+x-vol-app: &vol_app .:/app:rw
+x-vol-pnpm: &vol_pnpm pnpm_store:/pnpm-store
+x-vol-root-nm: &vol_root_nm root_node_modules:/app/node_modules
+
+x-vol-docker-sock: &vol_docker_sock /var/run/docker.sock:/var/run/docker.sock
+
+# ---------- base node config (map only) ----------
+x-node-base: &node_base
+  image: micro-node-base:local
+  working_dir: /app
+  init: true
+  tty: true
+  stdin_open: true
+
+# ---------- shared node dev command (watch package.json) ----------
+x-node-dev-cmd: &node_dev_cmd >
+  sh -c '
+    set -e
+
+    install_if_needed() {
+      STAMP="/pnpm-store/.pkg-$${SERVICE_NAME}.sha"
+      LOCK="/pnpm-store/.pnpm-install-lock"
+
+      FORCE=0
+      if [ ! -d "/app/node_modules/.pnpm" ]; then
+        echo "[$${SERVICE_NAME}] /app/node_modules/.pnpm missing -> force pnpm install"
+        FORCE=1
+      fi
+
+      NEW="$$(sha256sum "$$PKG_JSON" | cut -d" " -f1)"
+      OLD="$$(cat "$$STAMP" 2>/dev/null || true)"
+
+      if [ "$$FORCE" -eq 0 ] && [ "$$NEW" = "$$OLD" ]; then
+        return 0
+      fi
+
+      while ! mkdir "$$LOCK" 2>/dev/null; do sleep 0.2; done
+      trap "rmdir \"$${LOCK}\" 2>/dev/null || true" EXIT
+
+      echo "[$${SERVICE_NAME}] installing deps (FORCE=$$FORCE)"
+      pnpm --filter "$$SERVICE_NAME" install --prefer-offline
+
+      echo "$$NEW" > "$$STAMP"
+      rmdir "$$LOCK" 2>/dev/null || true
+      trap - EXIT
+    }
+
+    install_if_needed
+    (while true; do sleep 2; install_if_needed; done) &
+    exec pnpm --filter "$$SERVICE_NAME" dev
+  '
+
+
+services:
+  # ... (previous services)
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: docker_proxy
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      EXEC: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - default
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongo_db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    volumes:
+      - user_caas:/data/db
+    ports:
+      - "27017:27017" # Exposed for dev convenience
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "9001:9001"
+    volumes:
+      - homework_data:/data
+    networks:
+      - default
+      - minio_net
+
+  traefik:
+    image: traefik:v3.4
+    container_name: traefik
+    command:
+      - --api.insecure=true
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+      - "8088:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  admin-api:
+    <<: *node_base
+    container_name: admin
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - *env_shared
+      - ./packages/envs/.env.admin
+    environment:
+      PORT: "3000"
+      SERVICE_NAME: "admin-api"
+      PKG_JSON: "/app/apps/admin-api/package.json"
+    volumes:
+      - *vol_app
+      - *vol_pnpm
+      - *vol_root_nm
+      - admin_modules:/app/apps/admin-api/node_modules
+    command: *node_dev_cmd
+    # depends_on:
+    #   mongodb:
+    #     condition: service_healthy
+    #   redis:
+    #     condition: service_healthy
+
+  auth-api:
+    <<: *node_base
+    container_name: auth
+    ports:
+      - "${PORT:-3001}:3001"
+    env_file:
+      - *env_shared
+      - ./packages/envs/.env.auth
+    environment:
+      PORT: "3001"
+      SERVICE_NAME: "auth-api"
+      PKG_JSON: "/app/apps/auth-api/package.json"
+    volumes:
+      - *vol_app
+      - *vol_pnpm
+      - *vol_root_nm
+      - auth_modules:/app/apps/auth-api/node_modules
+    command: *node_dev_cmd
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  user-api:
+    <<: *node_base
+    container_name: user
+    ports:
+      - "${PORT:-3002}:3002"
+    env_file:
+      - *env_shared
+      - ./packages/envs/.env.user
+    environment:
+      PORT: "3002"
+      SERVICE_NAME: "user-api"
+      PKG_JSON: "/app/apps/user-api/package.json"
+    volumes:
+      - *vol_app
+      - *vol_pnpm
+      - *vol_root_nm
+      - user_modules:/app/apps/user-api/node_modules
+    command: *node_dev_cmd
+    depends_on:
+      auth-api:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+
+  class-api:
+    <<: *node_base
+    container_name: class
+    ports:
+      - "${PORT:-3003}:3003"
+    env_file:
+      - *env_shared
+      - ./packages/envs/.env.class-api
+    environment:
+      PORT: "3003"
+      SERVICE_NAME: "class-api"
+      PKG_JSON: "/app/apps/class-api/package.json"
+      ZONES_PATH: "/zones"
+      DOMAIN_SUFFIX: "kinghappy.id.vn"
+      DOCKER_HOST: "tcp://docker-proxy:2375"
+    volumes:
+      - *vol_app
+      - *vol_pnpm
+      # - *vol_docker_sock # REMOVED: Insecure socket mount
+      - *vol_root_nm
+      - class_modules:/app/apps/class-api/node_modules
+    command: *node_dev_cmd
+    depends_on:
+      auth-api:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      docker-proxy:
+        condition: service_started
+
+  gateway:
+    <<: *node_base
+    container_name: gate
+    ports:
+      - "${PORT:-3004}:3004"
+    env_file:
+      - *env_shared
+      - ./packages/envs/.env.gateway
+    environment:
+      PORT: "3004"
+      SERVICE_NAME: "gateway"
+      PKG_JSON: "/app/apps/gateway/package.json"
+    volumes:
+      - *vol_app
+      - *vol_pnpm
+      - *vol_root_nm
+      - gateway_modules:/app/apps/gateway/node_modules
+    command: *node_dev_cmd
+    depends_on:
+      admin-api:
+        condition: service_started
+      auth-api:
+        condition: service_started
+      user-api:
+        condition: service_started
+      class-api:
+        condition: service_started
+
+volumes:
+  homework_data:
+  user_caas:
+  pnpm_store:
+  admin_modules:
+  auth_modules:
+  user_modules:
+  class_modules:
+  gateway_modules:
+  root_node_modules:
+
+networks:
+  minio_net:
